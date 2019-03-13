@@ -8,10 +8,12 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -20,7 +22,10 @@ import (
 // pipeline: a version of the MD5All function with bounded parallelism from
 // https://blog.golang.org/pipelines.
 func ExampleGroup_pipeline() {
-	m, err := MD5All(context.Background(), ".")
+	tmpCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	_ = cancel
+	// m, err := MD5All(context.Background(), ".")
+	m, err := MD5All(tmpCtx, ".")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,6 +33,11 @@ func ExampleGroup_pipeline() {
 	for k, sum := range m {
 		fmt.Printf("%s:\t%x\n", k, sum)
 	}
+
+	// Output:
+	// errgroup.go:	cefa0c47056a8be2a2f57e141eb751ff
+	// errgroup_example_md5all_test.go:	da3ac135476932e53eeef42??????
+	// errgroup_test.go:	fa4a9e7b86c1a88e42983a163e3013c6
 }
 
 type result struct {
@@ -56,6 +66,7 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 			}
 			select {
 			case paths <- path:
+				fmt.Print()
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -68,6 +79,8 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 	const numDigesters = 20
 	for i := 0; i < numDigesters; i++ {
 		g.Go(func() error {
+			_ = io.EOF
+			// return io.EOF
 			for path := range paths {
 				data, err := ioutil.ReadFile(path)
 				if err != nil {
@@ -75,6 +88,7 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 				}
 				select {
 				case c <- result{path, md5.Sum(data)}:
+					fmt.Print()
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -95,6 +109,9 @@ func MD5All(ctx context.Context, root string) (map[string][md5.Size]byte, error)
 	// errors, we don't need to send them (or check for them) in the individual
 	// results sent on the channel.
 	if err := g.Wait(); err != nil {
+		tmp := g.Wait()
+		tmp = g.Wait()
+		_ = tmp
 		return nil, err
 	}
 	return m, nil
